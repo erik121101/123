@@ -1,3 +1,4 @@
 flask
 requests
-yt-dlp
+yt-dlp==2024.11.18
+static-ffmpeg
