@@ -133,22 +133,24 @@ def run_pipeline(job_id, url):
         update_job(job_id, step="Se descarcă videoclipul...", progress=10)
         video_path = job_dir / "video.mp4"
 
-        result = subprocess.run(
-            ["yt-dlp",
-             "--js-runtimes", "deno",
-             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-             "--merge-output-format", "mp4",
-             "-o", str(video_path), url],
-            capture_output=True, text=True, timeout=180
-        )
+        # Încercăm mai mulți player clients până găsim unul care merge
+        ytdlp_attempts = [
+            ["yt-dlp", "--extractor-args", "youtube:player_client=ios",
+             "-f", "b[ext=mp4]/b", "-o", str(video_path), url],
+            ["yt-dlp", "--extractor-args", "youtube:player_client=android",
+             "-f", "b[ext=mp4]/b", "-o", str(video_path), url],
+            ["yt-dlp", "--extractor-args", "youtube:player_client=tv_embedded",
+             "-f", "b[ext=mp4]/b", "-o", str(video_path), url],
+        ]
 
-        if result.returncode != 0:
-            result = subprocess.run(
-                ["yt-dlp", "--js-runtimes", "deno", "-f", "best", "-o", str(video_path), url],
-                capture_output=True, text=True, timeout=180
-            )
-            if result.returncode != 0:
-                raise Exception(f"Download eșuat: {result.stderr[:500]}")
+        last_err = ""
+        for attempt in ytdlp_attempts:
+            result = subprocess.run(attempt, capture_output=True, text=True, timeout=180)
+            if result.returncode == 0:
+                break
+            last_err = result.stderr[:500]
+        else:
+            raise Exception(f"Download eșuat: {last_err}")
 
         if not video_path.exists():
             all_videos = (list(job_dir.glob("*.mp4")) +
@@ -190,30 +192,6 @@ def run_pipeline(job_id, url):
             )
         if result.returncode != 0:
             raise Exception(f"Eliminare vocale eșuată: {result.stderr[:300]}")
-
-        # ── STEP 3b: Blur captions zone ───────────────────────────────────
-        update_job(job_id, step="Se elimină captionurile...", progress=42)
-        no_captions_path = job_dir / "no_captions.mp4"
-
-        # Blur subtil pe ultimele 18% din înălțime (zona captionurilor)
-        # iw/ih = latime/inaltime video, crop + boxblur + overlay
-        blur_filter = (
-            "[0:v]split[bg][fg];"
-            "[fg]crop=iw:ih*0.18:0:ih*0.82,boxblur=12:3[blurred];"
-            "[bg][blurred]overlay=0:H*0.82[out]"
-        )
-
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(no_vocals_path),
-             "-filter_complex", blur_filter,
-             "-map", "[out]", "-map", "0:a?",
-             "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-             "-c:a", "copy", str(no_captions_path)],
-            capture_output=True, text=True, timeout=180
-        )
-        if result.returncode == 0:
-            no_vocals_path = no_captions_path
-        # Dacă blur-ul eșuează continuăm cu video-ul fără vocale (fără captions blur)
 
         # ── STEP 4: Transcribe cu Groq Whisper ───────────────────────────
         update_job(job_id, step="Se transcrie cu Groq Whisper...", progress=50)
@@ -262,7 +240,7 @@ def run_pipeline(job_id, url):
             progress=100,
             status="done",
             files={
-                "video_no_vocals": no_vocals_path.name,  # conține și blur captions
+                "video_no_vocals": no_vocals_path.name,
                 "transcript_original": transcript_orig_path.name,
                 "transcript_romanian": transcript_ro_path.name,
                 "tts_romanian": tts_path.name,
