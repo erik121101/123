@@ -135,6 +135,7 @@ def run_pipeline(job_id, url):
 
         result = subprocess.run(
             ["yt-dlp",
+             "--js-runtimes", "deno",
              "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
              "--merge-output-format", "mp4",
              "-o", str(video_path), url],
@@ -143,7 +144,7 @@ def run_pipeline(job_id, url):
 
         if result.returncode != 0:
             result = subprocess.run(
-                ["yt-dlp", "-f", "best", "-o", str(video_path), url],
+                ["yt-dlp", "--js-runtimes", "deno", "-f", "best", "-o", str(video_path), url],
                 capture_output=True, text=True, timeout=180
             )
             if result.returncode != 0:
