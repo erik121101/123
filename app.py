@@ -136,13 +136,19 @@ def run_pipeline(job_id, url):
             ["yt-dlp",
              "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
              "--merge-output-format", "mp4",
+             "--extractor-args", "youtube:player_client=web",
+             "--no-check-certificates",
              "-o", str(video_path), url],
             capture_output=True, text=True, timeout=180
         )
 
         if result.returncode != 0:
             result = subprocess.run(
-                ["yt-dlp", "-f", "best", "-o", str(video_path), url],
+                ["yt-dlp",
+                 "-f", "b",
+                 "--extractor-args", "youtube:player_client=web",
+                 "--no-check-certificates",
+                 "-o", str(video_path), url],
                 capture_output=True, text=True, timeout=180
             )
             if result.returncode != 0:
