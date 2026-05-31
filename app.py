@@ -94,12 +94,12 @@ def generate_tts_cartesia(text, output_path):
         resp = requests.post(
             "https://api.cartesia.ai/tts/bytes",
             headers={
-                "Cartesia-Version": "2024-06-10",
+                "Cartesia-Version": "2026-03-01",
                 "X-API-Key": key,
                 "Content-Type": "application/json",
             },
             json={
-                "model_id": "sonic-3-5",
+                "model_id": "sonic-3.5",
                 "transcript": chunk,
                 "voice": {
                     "mode": "id",
