@@ -2,3 +2,6 @@ flask
 requests
 yt-dlp
 static-ffmpeg
+pytesseract
+opencv-python-headless
+Pillow
