@@ -27,10 +27,17 @@ except Exception as e:
 # Resolve binary paths
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 YTDLP_BIN  = shutil.which("yt-dlp") or "yt-dlp"
-NODE_BIN   = shutil.which("node") or shutil.which("nodejs") or "node"
+NODE_BIN   = shutil.which("node") or shutil.which("nodejs")
+DENO_BIN   = shutil.which("deno")
+
 print(f"🎬 ffmpeg: {FFMPEG_BIN}")
 print(f"📥 yt-dlp: {YTDLP_BIN}")
 print(f"🟩 node:   {NODE_BIN}")
+print(f"🦕 deno:   {DENO_BIN}")
+
+# Pick best JS runtime
+JS_RUNTIME = NODE_BIN or DENO_BIN
+print(f"⚡ JS runtime: {JS_RUNTIME}")
 
 app = Flask(__name__, static_folder='static')
 
@@ -38,7 +45,6 @@ DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
 jobs = {}
-
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 
 def update_job(job_id, **kwargs):
@@ -70,46 +76,47 @@ def translate_to_romanian(text):
 
     return " ".join(translated_chunks)
 
-def build_ytdlp_cmd(url, video_path, client, extra_args=None):
-    """Build yt-dlp command with node js-runtime if available."""
-    cmd = [YTDLP_BIN, "--no-playlist"]
-
-    # Pass node as JS runtime if found
-    if NODE_BIN and NODE_BIN != "node":
-        cmd += ["--js-runtimes", NODE_BIN]
-
-    cmd += ["--extractor-args", f"youtube:player_client={client}"]
-    cmd += ["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"]
-    cmd += ["--merge-output-format", "mp4"]
-    if extra_args:
-        cmd += extra_args
-    cmd += ["-o", str(video_path), url]
-    return cmd
-
 def try_download(url, video_path):
-    """Try multiple player clients until one works."""
-    clients = ["ios", "android", "tv_embedded", "web_embedded", "mweb"]
+    """Try multiple strategies to download the video."""
+    base_cmd = [YTDLP_BIN, "--no-playlist"]
 
-    for client in clients:
-        print(f"🔄 Trying player_client={client}")
-        cmd = build_ytdlp_cmd(url, video_path, client)
+    # Add JS runtime if available
+    if JS_RUNTIME:
+        base_cmd += ["--js-runtimes", JS_RUNTIME]
+
+    strategies = [
+        # (client, format_args)
+        ("ios",          ["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "--merge-output-format", "mp4"]),
+        ("android",      ["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "--merge-output-format", "mp4"]),
+        ("tv_embedded",  ["-f", "best[ext=mp4]/best", "--merge-output-format", "mp4"]),
+        ("ios",          []),  # no format arg fallback
+        ("android",      []),
+    ]
+
+    last_err = ""
+    for client, fmt_args in strategies:
+        print(f"🔄 Trying client={client} fmt={fmt_args}")
+        cmd = base_cmd + ["--extractor-args", f"youtube:player_client={client}"]
+        cmd += fmt_args
+        cmd += ["-o", str(video_path), url]
+
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        last_err = result.stderr
 
         if result.returncode == 0 and video_path.exists():
             print(f"✅ Success with client={client}")
             return True, None
 
-        # Check for renamed file
         all_videos = (list(video_path.parent.glob("*.mp4")) +
                       list(video_path.parent.glob("*.webm")) +
                       list(video_path.parent.glob("*.mkv")))
         if all_videos:
-            print(f"✅ Success with client={client} (alt file)")
+            print(f"✅ Success with client={client} alt file: {all_videos[0]}")
             return True, all_videos[0]
 
-        print(f"❌ client={client} failed: {result.stderr[-200:]}")
+        print(f"❌ client={client}: {result.stderr[-150:]}")
 
-    # Last resort: no options at all
+    # Absolute last resort — no client, no format
     result = subprocess.run(
         [YTDLP_BIN, "--no-playlist", "-o", str(video_path), url],
         capture_output=True, text=True, timeout=300
@@ -117,7 +124,8 @@ def try_download(url, video_path):
     if result.returncode == 0:
         return True, None
 
-    return False, result.stderr[:800]
+    return False, (result.stderr or last_err)[:800]
+
 
 def run_pipeline(job_id, url):
     job_dir = DOWNLOAD_DIR / job_id
