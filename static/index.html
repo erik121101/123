@@ -361,16 +361,7 @@
               <span class="ctrl-val" id="wplVal">6</span>
             </div>
           </div>
-          <div class="ctrl-group">
-            <label>Viteza TTS</label>
-            <div class="ctrl-row">
-              <input type="range" id="ttsSpeed" min="50" max="200" value="100" oninput="updateSpeed()"/>
-              <span class="ctrl-val" id="speedVal">1.0×</span>
-            </div>
-            <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted);margin-top:4px">
-              ⚡ reprocessat pe server la export
-            </div>
-          </div>
+
         </div>
 
         <!-- CAPTION PANE -->
@@ -491,7 +482,13 @@
           <button class="playbtn" id="playBtn" onclick="togglePlay()">▶</button>
           <span class="timecode" id="timecode">0:00 / 0:00</span>
           <div style="flex:1"></div>
-          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted)">Trage pentru trim</span>
+          <!-- TTS Speed control - CapCut style -->
+          <div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border-b);border-radius:8px;padding:5px 12px">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);white-space:nowrap">SPEED</span>
+            <input type="range" id="ttsSpeed" min="50" max="200" value="100" oninput="updateSpeed()" style="width:90px"/>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--green);min-width:34px;text-align:center" id="speedVal">1.0&#xD7;</span>
+            <button onclick="document.getElementById('ttsSpeed').value=100;updateSpeed()" style="background:none;border:1px solid var(--border-b);border-radius:5px;color:var(--muted);font-size:10px;padding:2px 6px;cursor:pointer;font-family:'JetBrains Mono',monospace" title="Reset la 1x">1&#xD7;</button>
+          </div>
         </div>
         <div class="tl-bar-wrap" id="tlWrap">
           <div class="tl-track"></div>
