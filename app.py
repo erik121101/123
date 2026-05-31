@@ -7,6 +7,7 @@ import threading
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from pathlib import Path
 
+# Load .env if present
 env_path = Path(".env")
 if env_path.exists():
     for line in env_path.read_text().splitlines():
@@ -26,93 +27,15 @@ FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 print(f"🎬 ffmpeg: {FFMPEG_BIN}")
 
 app = Flask(__name__, static_folder='static')
+
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
 jobs = {}
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 
-# Public Invidious instances to try in order
-INVIDIOUS_INSTANCES = [
-    "https://invidious.privacydev.net",
-    "https://inv.nadeko.net",
-    "https://invidious.nerdvpn.de",
-    "https://invidious.fdn.fr",
-    "https://y.com.sb",
-]
-
 def update_job(job_id, **kwargs):
     jobs[job_id].update(kwargs)
-
-def extract_video_id(url):
-    import re
-    patterns = [
-        r"shorts/([a-zA-Z0-9_-]{11})",
-        r"v=([a-zA-Z0-9_-]{11})",
-        r"youtu\.be/([a-zA-Z0-9_-]{11})",
-        r"embed/([a-zA-Z0-9_-]{11})",
-    ]
-    for p in patterns:
-        m = re.search(p, url)
-        if m:
-            return m.group(1)
-    raise Exception(f"Nu s-a putut extrage video ID din URL: {url}")
-
-def download_via_invidious(video_id, job_dir):
-    """Try each Invidious instance to get a direct video URL, then download it."""
-    headers = {"User-Agent": "Mozilla/5.0"}
-
-    for instance in INVIDIOUS_INSTANCES:
-        try:
-            print(f"🔄 Trying Invidious: {instance}")
-            api_url = f"{instance}/api/v1/videos/{video_id}"
-            resp = requests.get(api_url, headers=headers, timeout=15)
-            if resp.status_code != 200:
-                print(f"❌ {instance} returned {resp.status_code}")
-                continue
-
-            data = resp.json()
-            formats = data.get("adaptiveFormats", []) + data.get("formatStreams", [])
-
-            # Pick best mp4 with both video and audio (formatStreams) first
-            best = None
-            for f in data.get("formatStreams", []):
-                if "video/mp4" in f.get("type", ""):
-                    best = f
-                    break
-
-            # Fallback to adaptive
-            if not best:
-                for f in data.get("adaptiveFormats", []):
-                    if "video/mp4" in f.get("type", ""):
-                        best = f
-                        break
-
-            if not best:
-                print(f"❌ {instance} no mp4 stream found")
-                continue
-
-            video_url = best.get("url") or best.get("adaptiveFormats")
-            if not video_url:
-                continue
-
-            print(f"✅ Downloading from {instance} ...")
-            video_path = job_dir / "video.mp4"
-            with requests.get(video_url, headers=headers, stream=True, timeout=120) as r:
-                r.raise_for_status()
-                with open(video_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=1024 * 1024):
-                        f.write(chunk)
-
-            if video_path.exists() and video_path.stat().st_size > 10000:
-                print(f"✅ Downloaded {video_path.stat().st_size // 1024}KB")
-                return video_path
-
-        except Exception as e:
-            print(f"❌ {instance} error: {e}")
-            continue
-
-    raise Exception("Toate instanțele Invidious au eșuat. Încearcă mai târziu.")
 
 def translate_to_romanian(text):
     chunks = []
@@ -145,10 +68,35 @@ def run_pipeline(job_id, url):
     job_dir.mkdir(exist_ok=True)
 
     try:
-        # ── STEP 1: Download via Invidious ────────────────────────────────
+        # ── STEP 1: Download ──────────────────────────────────────────────
         update_job(job_id, step="Se descarcă videoclipul...", progress=10)
-        video_id = extract_video_id(url)
-        video_path = download_via_invidious(video_id, job_dir)
+        video_path = job_dir / "video.mp4"
+
+        result = subprocess.run(
+            ["yt-dlp",
+             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+             "--merge-output-format", "mp4",
+             "-o", str(video_path), url],
+            capture_output=True, text=True, timeout=180
+        )
+
+        if result.returncode != 0:
+            result = subprocess.run(
+                ["yt-dlp", "-f", "best", "-o", str(video_path), url],
+                capture_output=True, text=True, timeout=180
+            )
+
+        if result.returncode != 0:
+            raise Exception(f"Download eșuat: {result.stderr[:500]}")
+
+        if not video_path.exists():
+            all_videos = (list(job_dir.glob("*.mp4")) +
+                          list(job_dir.glob("*.webm")) +
+                          list(job_dir.glob("*.mkv")))
+            if all_videos:
+                video_path = all_videos[0]
+            else:
+                raise Exception("Niciun fișier video găsit după download.")
 
         # ── STEP 2: Extract audio ─────────────────────────────────────────
         update_job(job_id, step="Se extrage audio...", progress=25)
@@ -157,7 +105,7 @@ def run_pipeline(job_id, url):
         result = subprocess.run(
             [FFMPEG_BIN, "-y", "-i", str(video_path),
              "-vn", "-acodec", "libmp3lame", "-q:a", "2", str(audio_path)],
-            capture_output=True, text=True, timeout=120
+            capture_output=True, text=True, timeout=60
         )
         if result.returncode != 0:
             raise Exception(f"Extragere audio eșuată: {result.stderr[:300]}")
