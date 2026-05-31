@@ -16,7 +16,6 @@ if env_path.exists():
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
 
-# ── Setup static-ffmpeg (fallback) ───────────────────────────────────────────
 try:
     import static_ffmpeg
     static_ffmpeg.add_paths()
@@ -24,20 +23,8 @@ try:
 except Exception as e:
     print(f"⚠️ static-ffmpeg error: {e}")
 
-# Resolve binary paths
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
-YTDLP_BIN  = shutil.which("yt-dlp") or "yt-dlp"
-NODE_BIN   = shutil.which("node") or shutil.which("nodejs")
-DENO_BIN   = shutil.which("deno")
-
 print(f"🎬 ffmpeg: {FFMPEG_BIN}")
-print(f"📥 yt-dlp: {YTDLP_BIN}")
-print(f"🟩 node:   {NODE_BIN}")
-print(f"🦕 deno:   {DENO_BIN}")
-
-# Pick best JS runtime
-JS_RUNTIME = NODE_BIN or DENO_BIN
-print(f"⚡ JS runtime: {JS_RUNTIME}")
 
 app = Flask(__name__, static_folder='static')
 
@@ -76,56 +63,27 @@ def translate_to_romanian(text):
 
     return " ".join(translated_chunks)
 
-def try_download(url, video_path):
-    """Try multiple strategies to download the video."""
-    base_cmd = [YTDLP_BIN, "--no-playlist"]
+def download_video(url, job_dir):
+    """Download using pytubefix."""
+    from pytubefix import YouTube
+    from pytubefix.cli import on_progress
 
-    # Add JS runtime if available
-    if JS_RUNTIME:
-        base_cmd += ["--js-runtimes", JS_RUNTIME]
+    yt = YouTube(url, on_progress_callback=on_progress, use_oauth=False, allow_oauth_cache=False)
 
-    strategies = [
-        # (client, format_args)
-        ("ios",          ["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "--merge-output-format", "mp4"]),
-        ("android",      ["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "--merge-output-format", "mp4"]),
-        ("tv_embedded",  ["-f", "best[ext=mp4]/best", "--merge-output-format", "mp4"]),
-        ("ios",          []),  # no format arg fallback
-        ("android",      []),
-    ]
+    # Try to get progressive stream (video+audio in one)
+    stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').last()
+    if not stream:
+        # Fallback: highest resolution mp4
+        stream = yt.streams.filter(file_extension='mp4').order_by('resolution').last()
+    if not stream:
+        stream = yt.streams.first()
 
-    last_err = ""
-    for client, fmt_args in strategies:
-        print(f"🔄 Trying client={client} fmt={fmt_args}")
-        cmd = base_cmd + ["--extractor-args", f"youtube:player_client={client}"]
-        cmd += fmt_args
-        cmd += ["-o", str(video_path), url]
+    if not stream:
+        raise Exception("Nu s-a găsit niciun stream disponibil.")
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        last_err = result.stderr
-
-        if result.returncode == 0 and video_path.exists():
-            print(f"✅ Success with client={client}")
-            return True, None
-
-        all_videos = (list(video_path.parent.glob("*.mp4")) +
-                      list(video_path.parent.glob("*.webm")) +
-                      list(video_path.parent.glob("*.mkv")))
-        if all_videos:
-            print(f"✅ Success with client={client} alt file: {all_videos[0]}")
-            return True, all_videos[0]
-
-        print(f"❌ client={client}: {result.stderr[-150:]}")
-
-    # Absolute last resort — no client, no format
-    result = subprocess.run(
-        [YTDLP_BIN, "--no-playlist", "-o", str(video_path), url],
-        capture_output=True, text=True, timeout=300
-    )
-    if result.returncode == 0:
-        return True, None
-
-    return False, (result.stderr or last_err)[:800]
-
+    print(f"📥 Descărcare: {stream.resolution} {stream.mime_type}")
+    out_path = stream.download(output_path=str(job_dir), filename="video.mp4")
+    return Path(out_path)
 
 def run_pipeline(job_id, url):
     job_dir = DOWNLOAD_DIR / job_id
@@ -134,21 +92,14 @@ def run_pipeline(job_id, url):
     try:
         # ── STEP 1: Download ──────────────────────────────────────────────
         update_job(job_id, step="Se descarcă videoclipul...", progress=10)
-        video_path = job_dir / "video.mp4"
 
-        success, err_or_path = try_download(url, video_path)
-        if not success:
-            raise Exception(f"Download eșuat: {err_or_path}")
-        if isinstance(err_or_path, Path):
-            video_path = err_or_path
+        try:
+            video_path = download_video(url, job_dir)
+        except Exception as e:
+            raise Exception(f"Download eșuat: {e}")
+
         if not video_path.exists():
-            all_videos = (list(job_dir.glob("*.mp4")) +
-                          list(job_dir.glob("*.webm")) +
-                          list(job_dir.glob("*.mkv")))
-            if all_videos:
-                video_path = all_videos[0]
-            else:
-                raise Exception("Niciun fișier video găsit după download.")
+            raise Exception("Fișierul video nu a fost găsit după download.")
 
         # ── STEP 2: Extract audio ─────────────────────────────────────────
         update_job(job_id, step="Se extrage audio...", progress=25)
