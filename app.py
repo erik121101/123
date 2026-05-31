@@ -99,7 +99,7 @@ def generate_tts_cartesia(text, output_path):
                 "Content-Type": "application/json",
             },
             json={
-                "model_id": "sonic-2",
+                "model_id": "sonic-3-5",
                 "transcript": chunk,
                 "voice": {
                     "mode": "id",
@@ -110,6 +110,7 @@ def generate_tts_cartesia(text, output_path):
                     "encoding": "mp3",
                     "sample_rate": 44100,
                 },
+                "language": "ro",
             },
             timeout=120
         )
