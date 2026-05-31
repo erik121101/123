@@ -27,8 +27,10 @@ except Exception as e:
 # Resolve binary paths
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 YTDLP_BIN  = shutil.which("yt-dlp") or "yt-dlp"
+NODE_BIN   = shutil.which("node") or shutil.which("nodejs") or "node"
 print(f"🎬 ffmpeg: {FFMPEG_BIN}")
 print(f"📥 yt-dlp: {YTDLP_BIN}")
+print(f"🟩 node:   {NODE_BIN}")
 
 app = Flask(__name__, static_folder='static')
 
@@ -68,46 +70,54 @@ def translate_to_romanian(text):
 
     return " ".join(translated_chunks)
 
+def build_ytdlp_cmd(url, video_path, client, extra_args=None):
+    """Build yt-dlp command with node js-runtime if available."""
+    cmd = [YTDLP_BIN, "--no-playlist"]
+
+    # Pass node as JS runtime if found
+    if NODE_BIN and NODE_BIN != "node":
+        cmd += ["--js-runtimes", NODE_BIN]
+
+    cmd += ["--extractor-args", f"youtube:player_client={client}"]
+    cmd += ["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"]
+    cmd += ["--merge-output-format", "mp4"]
+    if extra_args:
+        cmd += extra_args
+    cmd += ["-o", str(video_path), url]
+    return cmd
+
 def try_download(url, video_path):
     """Try multiple player clients until one works."""
-    clients = [
-        "ios",
-        "android",
-        "tv_embedded",
-        "web_embedded",
-        "mweb",
-    ]
+    clients = ["ios", "android", "tv_embedded", "web_embedded", "mweb"]
+
     for client in clients:
         print(f"🔄 Trying player_client={client}")
-        result = subprocess.run(
-            [YTDLP_BIN,
-             "--no-playlist",
-             "--extractor-args", f"youtube:player_client={client}",
-             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-             "--merge-output-format", "mp4",
-             "-o", str(video_path), url],
-            capture_output=True, text=True, timeout=300
-        )
+        cmd = build_ytdlp_cmd(url, video_path, client)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
         if result.returncode == 0 and video_path.exists():
             print(f"✅ Success with client={client}")
             return True, None
-        # Also check for renamed file
-        parent = video_path.parent
-        all_videos = (list(parent.glob("*.mp4")) +
-                      list(parent.glob("*.webm")) +
-                      list(parent.glob("*.mkv")))
+
+        # Check for renamed file
+        all_videos = (list(video_path.parent.glob("*.mp4")) +
+                      list(video_path.parent.glob("*.webm")) +
+                      list(video_path.parent.glob("*.mkv")))
         if all_videos:
-            print(f"✅ Success with client={client} (renamed file)")
+            print(f"✅ Success with client={client} (alt file)")
             return True, all_videos[0]
 
-    # Last resort: no format selection, no client override
+        print(f"❌ client={client} failed: {result.stderr[-200:]}")
+
+    # Last resort: no options at all
     result = subprocess.run(
         [YTDLP_BIN, "--no-playlist", "-o", str(video_path), url],
         capture_output=True, text=True, timeout=300
     )
     if result.returncode == 0:
         return True, None
-    return False, result.stderr[:600]
+
+    return False, result.stderr[:800]
 
 def run_pipeline(job_id, url):
     job_dir = DOWNLOAD_DIR / job_id
