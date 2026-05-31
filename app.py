@@ -70,12 +70,10 @@ def translate_to_romanian(text):
 
 
 def generate_tts_cartesia(text, output_path):
-    """Generează TTS cu Cartesia folosind vocea flip și salvează ca MP3."""
     key = CARTESIA_API_KEY
     if not key:
         raise Exception("CARTESIA_API_KEY lipsă. Adaugă-l în Railway → Variables.")
 
-    # Cartesia limitează la ~5000 caractere per request, împărțim dacă e nevoie
     MAX_CHARS = 4500
     chunks = []
     while len(text) > MAX_CHARS:
@@ -118,7 +116,6 @@ def generate_tts_cartesia(text, output_path):
             raise Exception(f"Cartesia eroare {resp.status_code}: {resp.text[:300]}")
         audio_parts.append(resp.content)
 
-    # Concatenăm toate chunk-urile audio într-un singur fișier MP3
     with open(output_path, "wb") as f:
         for part in audio_parts:
             f.write(part)
@@ -133,7 +130,6 @@ def run_pipeline(job_id, url):
         update_job(job_id, step="Se descarcă videoclipul...", progress=10)
         video_path = job_dir / "video.mp4"
 
-        # Încercăm mai mulți player clients până găsim unul care merge
         ytdlp_attempts = [
             ["yt-dlp", "--extractor-args", "youtube:player_client=ios",
              "-f", "b[ext=mp4]/b", "-o", str(video_path), url],
@@ -193,8 +189,29 @@ def run_pipeline(job_id, url):
         if result.returncode != 0:
             raise Exception(f"Eliminare vocale eșuată: {result.stderr[:300]}")
 
+        # ── STEP 3b: Blur captions (zona de jos 18%) ──────────────────────
+        update_job(job_id, step="Se elimină captionurile...", progress=42)
+        final_video_path = job_dir / "final.mp4"
+
+        blur_filter = (
+            "[0:v]split[bg][fg];"
+            "[fg]crop=iw:ih*0.18:0:ih*0.82,boxblur=10:2[blurred];"
+            "[bg][blurred]overlay=0:H*0.82[out]"
+        )
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(no_vocals_path),
+             "-filter_complex", blur_filter,
+             "-map", "[out]", "-map", "0:a?",
+             "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+             "-c:a", "copy", str(final_video_path)],
+            capture_output=True, text=True, timeout=180
+        )
+        # Dacă blur-ul eșuează, folosim video-ul fără vocale ca fallback
+        if result.returncode == 0:
+            no_vocals_path = final_video_path
+
         # ── STEP 4: Transcribe cu Groq Whisper ───────────────────────────
-        update_job(job_id, step="Se transcrie cu Groq Whisper...", progress=50)
+        update_job(job_id, step="Se transcrie cu Groq Whisper...", progress=55)
 
         key = GROQ_API_KEY
         if not key:
@@ -222,14 +239,14 @@ def run_pipeline(job_id, url):
         transcript_orig_path.write_text(transcript_text, encoding="utf-8")
 
         # ── STEP 5: Translate ─────────────────────────────────────────────
-        update_job(job_id, step="Se traduce în română...", progress=65)
+        update_job(job_id, step="Se traduce în română...", progress=70)
         romanian_text = translate_to_romanian(transcript_text)
 
         transcript_ro_path = job_dir / "transcript_romana.txt"
         transcript_ro_path.write_text(romanian_text, encoding="utf-8")
 
         # ── STEP 6: TTS cu Cartesia ───────────────────────────────────────
-        update_job(job_id, step="Se generează vocea în română (Cartesia)...", progress=80)
+        update_job(job_id, step="Se generează vocea în română (Cartesia)...", progress=85)
         tts_path = job_dir / "voce_romana.mp3"
         generate_tts_cartesia(romanian_text, tts_path)
 
