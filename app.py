@@ -33,7 +33,7 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 
 jobs = {}
 
-ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+GROQ_API_KEY      = os.environ.get("GROQ_API_KEY", "")
 CARTESIA_API_KEY   = os.environ.get("CARTESIA_API_KEY", "")
 CARTESIA_VOICE_ID  = os.environ.get("CARTESIA_VOICE_ID", "e1def6dd-c945-4630-bb41-d29c79e1e489")
 
@@ -99,11 +99,11 @@ def generate_tts_cartesia(text, output_path):
                 "Content-Type": "application/json",
             },
             json={
-                "model_id": "sonic-3.5",
+                "model_id": "sonic-multilingual",
                 "transcript": chunk,
                 "voice": {
                     "mode": "id",
-                    "id": e1def6dd-c945-4630-bb41-d29c79e1e489,
+                    "id": CARTESIA_VOICE_ID,
                 },
                 "output_format": {
                     "container": "mp3",
@@ -190,30 +190,30 @@ def run_pipeline(job_id, url):
         if result.returncode != 0:
             raise Exception(f"Eliminare vocale eșuată: {result.stderr[:300]}")
 
-        # ── STEP 4: Transcribe ────────────────────────────────────────────
-        update_job(job_id, step="Se transcrie cu ElevenLabs...", progress=50)
+        # ── STEP 4: Transcribe cu Groq Whisper ───────────────────────────
+        update_job(job_id, step="Se transcrie cu Groq Whisper...", progress=50)
 
-        key = ELEVENLABS_API_KEY
+        key = GROQ_API_KEY
         if not key:
-            raise Exception("ELEVENLABS_API_KEY lipsă. Adaugă-l în Railway → Variables.")
+            raise Exception("GROQ_API_KEY lipsă. Adaugă-l în Railway → Variables.")
 
         with open(audio_path, "rb") as f:
             audio_data = f.read()
 
         response = requests.post(
-            "https://api.elevenlabs.io/v1/speech-to-text",
-            headers={"xi-api-key": key},
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {key}"},
             files={"file": ("audio.mp3", audio_data, "audio/mpeg")},
-            data={"model_id": "scribe_v1"},
+            data={"model": "whisper-large-v3", "response_format": "json"},
             timeout=120
         )
 
         if response.status_code != 200:
-            raise Exception(f"ElevenLabs eroare {response.status_code}: {response.text[:300]}")
+            raise Exception(f"Groq eroare {response.status_code}: {response.text[:300]}")
 
         transcript_text = response.json().get("text", "")
         if not transcript_text:
-            raise Exception("ElevenLabs a returnat o transcriere goală.")
+            raise Exception("Groq a returnat o transcriere goală.")
 
         transcript_orig_path = job_dir / "transcript_original.txt"
         transcript_orig_path.write_text(transcript_text, encoding="utf-8")
@@ -371,10 +371,10 @@ def download(job_id, filename):
 
 
 if __name__ == "__main__":
-    if not ELEVENLABS_API_KEY:
-        print("\n⚠️  ELEVENLABS_API_KEY lipsă!")
+    if not GROQ_API_KEY:
+        print("\n⚠️  GROQ_API_KEY lipsă!")
     else:
-        print("\n✅  ElevenLabs API Key detectat.")
+        print("\n✅  Groq API Key detectat.")
     if not CARTESIA_API_KEY:
         print("⚠️  CARTESIA_API_KEY lipsă!")
     else:
