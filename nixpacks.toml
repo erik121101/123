@@ -1,3 +1,5 @@
 [phases.setup]
-nixPkgs = ["deno"]
- 
+nixPkgs = ["tesseract", "opencv"]
+
+[phases.install]
+cmds = ["pip install pytesseract opencv-python-headless Pillow --break-system-packages"]
