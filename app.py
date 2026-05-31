@@ -193,6 +193,30 @@ def run_pipeline(job_id, url):
         if result.returncode != 0:
             raise Exception(f"Eliminare vocale eșuată: {result.stderr[:300]}")
 
+        # ── STEP 3b: Blur captions zone ───────────────────────────────────
+        update_job(job_id, step="Se elimină captionurile...", progress=42)
+        no_captions_path = job_dir / "no_captions.mp4"
+
+        # Blur subtil pe ultimele 18% din înălțime (zona captionurilor)
+        # iw/ih = latime/inaltime video, crop + boxblur + overlay
+        blur_filter = (
+            "[0:v]split[bg][fg];"
+            "[fg]crop=iw:ih*0.18:0:ih*0.82,boxblur=12:3[blurred];"
+            "[bg][blurred]overlay=0:H*0.82[out]"
+        )
+
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(no_vocals_path),
+             "-filter_complex", blur_filter,
+             "-map", "[out]", "-map", "0:a?",
+             "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+             "-c:a", "copy", str(no_captions_path)],
+            capture_output=True, text=True, timeout=180
+        )
+        if result.returncode == 0:
+            no_vocals_path = no_captions_path
+        # Dacă blur-ul eșuează continuăm cu video-ul fără vocale
+
         # ── STEP 4: Transcribe cu Groq Whisper ───────────────────────────
         update_job(job_id, step="Se transcrie cu Groq Whisper...", progress=50)
 
