@@ -7,7 +7,6 @@ import threading
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from pathlib import Path
 
-# Load .env if present
 env_path = Path(".env")
 if env_path.exists():
     for line in env_path.read_text().splitlines():
@@ -24,7 +23,9 @@ except Exception as e:
     print(f"⚠️ static-ffmpeg error: {e}")
 
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
+COOKIES_FILE = Path("cookies.txt")
 print(f"🎬 ffmpeg: {FFMPEG_BIN}")
+print(f"🍪 cookies: {'found' if COOKIES_FILE.exists() else 'NOT FOUND'}")
 
 app = Flask(__name__, static_folder='static')
 
@@ -72,19 +73,24 @@ def run_pipeline(job_id, url):
         update_job(job_id, step="Se descarcă videoclipul...", progress=10)
         video_path = job_dir / "video.mp4"
 
-        result = subprocess.run(
-            ["yt-dlp",
-             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-             "--merge-output-format", "mp4",
-             "-o", str(video_path), url],
-            capture_output=True, text=True, timeout=180
-        )
+        cmd = ["yt-dlp",
+               "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+               "--merge-output-format", "mp4"]
+
+        if COOKIES_FILE.exists():
+            cmd += ["--cookies", str(COOKIES_FILE)]
+
+        cmd += ["-o", str(video_path), url]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
 
         if result.returncode != 0:
-            result = subprocess.run(
-                ["yt-dlp", "-f", "best", "-o", str(video_path), url],
-                capture_output=True, text=True, timeout=180
-            )
+            # fallback fără format specific
+            cmd2 = ["yt-dlp"]
+            if COOKIES_FILE.exists():
+                cmd2 += ["--cookies", str(COOKIES_FILE)]
+            cmd2 += ["-f", "best", "-o", str(video_path), url]
+            result = subprocess.run(cmd2, capture_output=True, text=True, timeout=180)
 
         if result.returncode != 0:
             raise Exception(f"Download eșuat: {result.stderr[:500]}")
