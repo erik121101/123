@@ -68,6 +68,47 @@ def translate_to_romanian(text):
 
     return " ".join(translated_chunks)
 
+def try_download(url, video_path):
+    """Try multiple player clients until one works."""
+    clients = [
+        "ios",
+        "android",
+        "tv_embedded",
+        "web_embedded",
+        "mweb",
+    ]
+    for client in clients:
+        print(f"🔄 Trying player_client={client}")
+        result = subprocess.run(
+            [YTDLP_BIN,
+             "--no-playlist",
+             "--extractor-args", f"youtube:player_client={client}",
+             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+             "--merge-output-format", "mp4",
+             "-o", str(video_path), url],
+            capture_output=True, text=True, timeout=300
+        )
+        if result.returncode == 0 and video_path.exists():
+            print(f"✅ Success with client={client}")
+            return True, None
+        # Also check for renamed file
+        parent = video_path.parent
+        all_videos = (list(parent.glob("*.mp4")) +
+                      list(parent.glob("*.webm")) +
+                      list(parent.glob("*.mkv")))
+        if all_videos:
+            print(f"✅ Success with client={client} (renamed file)")
+            return True, all_videos[0]
+
+    # Last resort: no format selection, no client override
+    result = subprocess.run(
+        [YTDLP_BIN, "--no-playlist", "-o", str(video_path), url],
+        capture_output=True, text=True, timeout=300
+    )
+    if result.returncode == 0:
+        return True, None
+    return False, result.stderr[:600]
+
 def run_pipeline(job_id, url):
     job_dir = DOWNLOAD_DIR / job_id
     job_dir.mkdir(exist_ok=True)
@@ -77,30 +118,11 @@ def run_pipeline(job_id, url):
         update_job(job_id, step="Se descarcă videoclipul...", progress=10)
         video_path = job_dir / "video.mp4"
 
-        # Try best quality first
-        result = subprocess.run(
-            [YTDLP_BIN,
-             "--no-playlist",
-             "--extractor-args", "youtube:player_client=web",
-             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-             "--merge-output-format", "mp4",
-             "-o", str(video_path), url],
-            capture_output=True, text=True, timeout=300
-        )
-
-        # Fallback: no format selection at all
-        if result.returncode != 0:
-            result = subprocess.run(
-                [YTDLP_BIN,
-                 "--no-playlist",
-                 "--extractor-args", "youtube:player_client=web",
-                 "-o", str(video_path), url],
-                capture_output=True, text=True, timeout=300
-            )
-
-        if result.returncode != 0:
-            raise Exception(f"Download eșuat: {result.stderr[:600]}")
-
+        success, err_or_path = try_download(url, video_path)
+        if not success:
+            raise Exception(f"Download eșuat: {err_or_path}")
+        if isinstance(err_or_path, Path):
+            video_path = err_or_path
         if not video_path.exists():
             all_videos = (list(job_dir.glob("*.mp4")) +
                           list(job_dir.glob("*.webm")) +
