@@ -121,88 +121,6 @@ def generate_tts_cartesia(text, output_path):
             f.write(part)
 
 
-
-def remove_captions_ocr(input_path, output_path):
-    """Detectează text cu OCR și aplică blur doar pe zonele cu captions."""
-    try:
-        import cv2
-        import pytesseract
-        from PIL import Image
-        import numpy as np
-    except ImportError:
-        raise Exception("pytesseract/opencv nu sunt instalate")
-
-    cap = cv2.VideoCapture(str(input_path))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    # Scanăm 1 frame pe secundă pentru a găsi zona cu text
-    text_boxes = []
-    frame_idx = 0
-    sample_every = max(1, int(fps))  # 1 frame/secundă
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if frame_idx % sample_every == 0:
-            # Convertim la PIL pentru pytesseract
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(rgb)
-            try:
-                data = pytesseract.image_to_data(
-                    pil_img, output_type=pytesseract.Output.DICT,
-                    config='--psm 6'
-                )
-                for i, text in enumerate(data['text']):
-                    if text.strip() and int(data['conf'][i]) > 40:
-                        x, y = data['left'][i], data['top'][i]
-                        w, h = data['width'][i], data['height'][i]
-                        # Păstrăm doar textul din jumătatea de jos
-                        if y > height * 0.5:
-                            text_boxes.append((x, y, x+w, y+h))
-            except Exception:
-                pass
-        frame_idx += 1
-
-    cap.release()
-
-    if not text_boxes:
-        # Nu s-a găsit text — returnăm input-ul nemodificat
-        return input_path
-
-    # Calculăm bounding box-ul combinat al tuturor textelor găsite
-    x1 = max(0, min(b[0] for b in text_boxes) - 10)
-    y1 = max(0, min(b[1] for b in text_boxes) - 10)
-    x2 = min(width, max(b[2] for b in text_boxes) + 10)
-    y2 = min(height, max(b[3] for b in text_boxes) + 10)
-
-    # Blur FFmpeg pe zona detectată
-    bw = x2 - x1
-    bh = y2 - y1
-    blur_filter = (
-        f"[0:v]split[bg][fg];"
-        f"[fg]crop={bw}:{bh}:{x1}:{y1},boxblur=15:3[blurred];"
-        f"[bg][blurred]overlay={x1}:{y1}[out]"
-    )
-
-    result = subprocess.run(
-        ["ffmpeg", "-y", "-i", str(input_path),
-         "-filter_complex", blur_filter,
-         "-map", "[out]", "-map", "0:a?",
-         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-         "-c:a", "copy", str(output_path)],
-        capture_output=True, text=True, timeout=300
-    )
-
-    if result.returncode != 0:
-        raise Exception(f"FFmpeg blur eșuat: {result.stderr[:200]}")
-
-    return output_path
-
-
 def run_pipeline(job_id, url):
     job_dir = DOWNLOAD_DIR / job_id
     job_dir.mkdir(exist_ok=True)
@@ -271,13 +189,26 @@ def run_pipeline(job_id, url):
         if result.returncode != 0:
             raise Exception(f"Eliminare vocale eșuată: {result.stderr[:300]}")
 
-        # ── STEP 3b: Caption removal cu OCR ──────────────────────────────
-        update_job(job_id, step="Se detectează și elimină captionurile...", progress=42)
+        # ── STEP 3b: Blur captions (zona de jos 18%) ──────────────────────
+        update_job(job_id, step="Se elimină captionurile...", progress=42)
         final_video_path = job_dir / "final.mp4"
-        try:
-            no_vocals_path = remove_captions_ocr(no_vocals_path, final_video_path)
-        except Exception as ce:
-            print(f"Caption removal eșuat (continuăm fără): {ce}")
+
+        blur_filter = (
+            "[0:v]split[bg][fg];"
+            "[fg]crop=iw:ih*0.18:0:ih*0.82,boxblur=10:2[blurred];"
+            "[bg][blurred]overlay=0:H*0.82[out]"
+        )
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(no_vocals_path),
+             "-filter_complex", blur_filter,
+             "-map", "[out]", "-map", "0:a?",
+             "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+             "-c:a", "copy", str(final_video_path)],
+            capture_output=True, text=True, timeout=180
+        )
+        # Dacă blur-ul eșuează, folosim video-ul fără vocale ca fallback
+        if result.returncode == 0:
+            no_vocals_path = final_video_path
 
         # ── STEP 4: Transcribe cu Groq Whisper ───────────────────────────
         update_job(job_id, step="Se transcrie cu Groq Whisper...", progress=55)
