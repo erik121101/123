@@ -24,9 +24,11 @@ try:
 except Exception as e:
     print(f"⚠️ static-ffmpeg error: {e}")
 
-# Resolve ffmpeg binary path
+# Resolve binary paths
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
-print(f"🎬 ffmpeg path: {FFMPEG_BIN}")
+YTDLP_BIN  = shutil.which("yt-dlp") or "yt-dlp"
+print(f"🎬 ffmpeg: {FFMPEG_BIN}")
+print(f"📥 yt-dlp: {YTDLP_BIN}")
 
 app = Flask(__name__, static_folder='static')
 
@@ -75,21 +77,29 @@ def run_pipeline(job_id, url):
         update_job(job_id, step="Se descarcă videoclipul...", progress=10)
         video_path = job_dir / "video.mp4"
 
+        # Try best quality first
         result = subprocess.run(
-            ["yt-dlp",
+            [YTDLP_BIN,
+             "--no-playlist",
+             "--extractor-args", "youtube:player_client=web",
              "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
              "--merge-output-format", "mp4",
              "-o", str(video_path), url],
-            capture_output=True, text=True, timeout=180
+            capture_output=True, text=True, timeout=300
         )
 
+        # Fallback: no format selection at all
         if result.returncode != 0:
             result = subprocess.run(
-                ["yt-dlp", "-f", "best", "-o", str(video_path), url],
-                capture_output=True, text=True, timeout=180
+                [YTDLP_BIN,
+                 "--no-playlist",
+                 "--extractor-args", "youtube:player_client=web",
+                 "-o", str(video_path), url],
+                capture_output=True, text=True, timeout=300
             )
+
         if result.returncode != 0:
-            raise Exception(f"Download eșuat: {result.stderr[:500]}")
+            raise Exception(f"Download eșuat: {result.stderr[:600]}")
 
         if not video_path.exists():
             all_videos = (list(job_dir.glob("*.mp4")) +
@@ -107,7 +117,7 @@ def run_pipeline(job_id, url):
         result = subprocess.run(
             [FFMPEG_BIN, "-y", "-i", str(video_path),
              "-vn", "-acodec", "libmp3lame", "-q:a", "2", str(audio_path)],
-            capture_output=True, text=True, timeout=60
+            capture_output=True, text=True, timeout=120
         )
         if result.returncode != 0:
             raise Exception(f"Extragere audio eșuată: {result.stderr[:300]}")
