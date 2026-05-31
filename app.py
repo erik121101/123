@@ -23,12 +23,14 @@ except Exception as e:
     print(f"⚠️ static-ffmpeg error: {e}")
 
 FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
+NODE_BIN   = shutil.which("node") or shutil.which("nodejs")
 COOKIES_FILE = Path("cookies.txt")
-print(f"🎬 ffmpeg: {FFMPEG_BIN}")
+
+print(f"🎬 ffmpeg:  {FFMPEG_BIN}")
+print(f"🟩 node:    {NODE_BIN}")
 print(f"🍪 cookies: {'found' if COOKIES_FILE.exists() else 'NOT FOUND'}")
 
 app = Flask(__name__, static_folder='static')
-
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
@@ -47,7 +49,6 @@ def translate_to_romanian(text):
         chunks.append(text[:split_at + 1])
         text = text[split_at + 1:]
     chunks.append(text)
-
     translated_chunks = []
     for chunk in chunks:
         if not chunk.strip():
@@ -61,8 +62,17 @@ def translate_to_romanian(text):
         data = resp.json()
         translated = "".join(part[0] for part in data[0] if part[0])
         translated_chunks.append(translated)
-
     return " ".join(translated_chunks)
+
+def build_cmd(url, video_path, fmt_args):
+    cmd = ["yt-dlp"]
+    if NODE_BIN:
+        cmd += ["--js-runtimes", NODE_BIN]
+    if COOKIES_FILE.exists():
+        cmd += ["--cookies", str(COOKIES_FILE)]
+    cmd += fmt_args
+    cmd += ["-o", str(video_path), url]
+    return cmd
 
 def run_pipeline(job_id, url):
     job_dir = DOWNLOAD_DIR / job_id
@@ -73,32 +83,33 @@ def run_pipeline(job_id, url):
         update_job(job_id, step="Se descarcă videoclipul...", progress=10)
         video_path = job_dir / "video.mp4"
 
-        cmd = ["yt-dlp",
-               "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-               "--merge-output-format", "mp4"]
+        attempts = [
+            ["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "--merge-output-format", "mp4"],
+            ["-f", "best[ext=mp4]/best"],
+            [],
+        ]
 
-        if COOKIES_FILE.exists():
-            cmd += ["--cookies", str(COOKIES_FILE)]
+        success = False
+        last_err = ""
+        for fmt_args in attempts:
+            cmd = build_cmd(url, video_path, fmt_args)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0:
+                success = True
+                break
+            last_err = result.stderr
+            # check if file appeared anyway
+            all_videos = list(job_dir.glob("*.mp4")) + list(job_dir.glob("*.webm")) + list(job_dir.glob("*.mkv"))
+            if all_videos:
+                video_path = all_videos[0]
+                success = True
+                break
 
-        cmd += ["-o", str(video_path), url]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-
-        if result.returncode != 0:
-            # fallback fără format specific
-            cmd2 = ["yt-dlp"]
-            if COOKIES_FILE.exists():
-                cmd2 += ["--cookies", str(COOKIES_FILE)]
-            cmd2 += ["-f", "best", "-o", str(video_path), url]
-            result = subprocess.run(cmd2, capture_output=True, text=True, timeout=180)
-
-        if result.returncode != 0:
-            raise Exception(f"Download eșuat: {result.stderr[:500]}")
+        if not success:
+            raise Exception(f"Download eșuat: {last_err[:600]}")
 
         if not video_path.exists():
-            all_videos = (list(job_dir.glob("*.mp4")) +
-                          list(job_dir.glob("*.webm")) +
-                          list(job_dir.glob("*.mkv")))
+            all_videos = list(job_dir.glob("*.mp4")) + list(job_dir.glob("*.webm")) + list(job_dir.glob("*.mkv"))
             if all_videos:
                 video_path = all_videos[0]
             else:
@@ -107,11 +118,10 @@ def run_pipeline(job_id, url):
         # ── STEP 2: Extract audio ─────────────────────────────────────────
         update_job(job_id, step="Se extrage audio...", progress=25)
         audio_path = job_dir / "audio.mp3"
-
         result = subprocess.run(
             [FFMPEG_BIN, "-y", "-i", str(video_path),
              "-vn", "-acodec", "libmp3lame", "-q:a", "2", str(audio_path)],
-            capture_output=True, text=True, timeout=60
+            capture_output=True, text=True, timeout=120
         )
         if result.returncode != 0:
             raise Exception(f"Extragere audio eșuată: {result.stderr[:300]}")
@@ -119,7 +129,6 @@ def run_pipeline(job_id, url):
         # ── STEP 3: Remove vocals ─────────────────────────────────────────
         update_job(job_id, step="Se elimină vocile...", progress=40)
         no_vocals_path = job_dir / "no_vocals.mp4"
-
         result = subprocess.run(
             [FFMPEG_BIN, "-y", "-i", str(video_path),
              "-af", "pan=stereo|c0=c0-c1|c1=c1-c0",
@@ -141,10 +150,8 @@ def run_pipeline(job_id, url):
         key = ELEVENLABS_API_KEY
         if not key:
             raise Exception("ELEVENLABS_API_KEY lipsă. Adaugă-l în Railway → Variables.")
-
         with open(audio_path, "rb") as f:
             audio_data = f.read()
-
         response = requests.post(
             "https://api.elevenlabs.io/v1/speech-to-text",
             headers={"xi-api-key": key},
@@ -154,27 +161,21 @@ def run_pipeline(job_id, url):
         )
         if response.status_code != 200:
             raise Exception(f"ElevenLabs eroare {response.status_code}: {response.text[:300]}")
-
         transcript_text = response.json().get("text", "")
         if not transcript_text:
             raise Exception("ElevenLabs a returnat o transcriere goală.")
-
         transcript_orig_path = job_dir / "transcript_original.txt"
         transcript_orig_path.write_text(transcript_text, encoding="utf-8")
 
         # ── STEP 5: Translate ─────────────────────────────────────────────
         update_job(job_id, step="Se traduce în română...", progress=80)
         romanian_text = translate_to_romanian(transcript_text)
-
         transcript_ro_path = job_dir / "transcript_romana.txt"
         transcript_ro_path.write_text(romanian_text, encoding="utf-8")
 
         # ── DONE ──────────────────────────────────────────────────────────
         update_job(
-            job_id,
-            step="Gata!",
-            progress=100,
-            status="done",
+            job_id, step="Gata!", progress=100, status="done",
             files={
                 "video_no_vocals": no_vocals_path.name,
                 "transcript_original": transcript_orig_path.name,
@@ -200,7 +201,6 @@ def process():
     url = data.get("url", "").strip()
     if not url:
         return jsonify({"error": "Niciun URL furnizat"}), 400
-
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "running", "step": "Se pornește...", "progress": 0}
     threading.Thread(target=run_pipeline, args=(job_id, url), daemon=True).start()
@@ -222,7 +222,6 @@ def download(job_id, filename):
     if not file_path.exists():
         return jsonify({"error": "Fișier negăsit"}), 404
     return send_file(str(file_path), as_attachment=True, download_name=filename)
-
 
 if __name__ == "__main__":
     if not ELEVENLABS_API_KEY:
