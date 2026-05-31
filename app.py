@@ -99,7 +99,7 @@ def generate_tts_cartesia(text, output_path):
                 "Content-Type": "application/json",
             },
             json={
-                "model_id": "sonic-multilingual",
+                "model_id": "sonic-2",
                 "transcript": chunk,
                 "voice": {
                     "mode": "id",
