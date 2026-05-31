@@ -3,7 +3,7 @@ import uuid
 import subprocess
 import requests
 import threading
-from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file, send_from_directory, session, redirect
 from pathlib import Path
 
 # Load .env if present
@@ -24,6 +24,9 @@ except Exception as e:
     print(f"⚠️ static-ffmpeg error: {e}")
 
 app = Flask(__name__, static_folder='static')
+app.secret_key = "xK9#mP2$vL7nQ4wR"
+
+PASSWORD = "9357"
 
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
@@ -184,6 +187,115 @@ def run_pipeline(job_id, url):
 
     except Exception as e:
         update_job(job_id, status="error", error=str(e), step="Eroare")
+
+
+@app.before_request
+def check_password():
+    public_paths = ('/login', '/static')
+    if any(request.path.startswith(p) for p in public_paths):
+        return None
+    if not session.get('authenticated'):
+        return redirect('/login')
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = ""
+    if request.method == "POST":
+        if request.form.get("parola", "") == PASSWORD:
+            session['authenticated'] = True
+            return redirect('/')
+        error = "Parolă greșită. Încearcă din nou."
+
+    return f"""<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Autentificare</title>
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #0f0f1a;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh;
+        }}
+        .card {{
+            background: #1a1a2e;
+            border: 1px solid #2a2a4a;
+            border-radius: 16px;
+            padding: 48px 40px;
+            width: 100%;
+            max-width: 380px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }}
+        h1 {{
+            color: #fff;
+            font-size: 1.5rem;
+            margin-bottom: 8px;
+            text-align: center;
+        }}
+        p.sub {{
+            color: #888;
+            font-size: 0.9rem;
+            text-align: center;
+            margin-bottom: 32px;
+        }}
+        label {{
+            color: #aaa;
+            font-size: 0.85rem;
+            display: block;
+            margin-bottom: 8px;
+        }}
+        input[type=password] {{
+            width: 100%;
+            padding: 12px 16px;
+            background: #0f0f1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 1.1rem;
+            letter-spacing: 4px;
+            outline: none;
+            transition: border 0.2s;
+        }}
+        input[type=password]:focus {{ border-color: #6c63ff; }}
+        button {{
+            width: 100%;
+            margin-top: 20px;
+            padding: 13px;
+            background: #6c63ff;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }}
+        button:hover {{ background: #574fd6; }}
+        .error {{
+            margin-top: 16px;
+            color: #ff6b6b;
+            font-size: 0.9rem;
+            text-align: center;
+        }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🔒 Acces restricționat</h1>
+        <p class="sub">Introduceți parola pentru a continua</p>
+        <form method="POST">
+            <label>Parolă</label>
+            <input type="password" name="parola" autofocus placeholder="••••">
+            <button type="submit">Intră</button>
+        </form>
+        {'<div class="error">⚠ ' + error + '</div>' if error else ''}
+    </div>
+</body>
+</html>"""
 
 
 @app.route("/")
