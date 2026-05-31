@@ -318,7 +318,9 @@ def run_export(job_id, tts_text, settings):
         bold       = 1 if settings.get("cap_bold", True) else 0
         cap_bg     = settings.get("cap_bg", "&H80000000")
 
-        srt_esc = str(srt_path).replace("\\", "/")
+        # Use absolute resolved path and escape colon for ffmpeg subtitles filter
+        srt_abs = str(srt_path.resolve()).replace("\\", "/")
+        srt_esc = srt_abs.replace(":", "\\:")
         force_style = (
             f"FontName=Arial,FontSize={fontsize},Bold={bold},"
             f"PrimaryColour={color},OutlineColour={outline_c},"
@@ -327,28 +329,35 @@ def run_export(job_id, tts_text, settings):
         )
         subtitle_filter = f"subtitles='{srt_esc}':force_style='{force_style}'"
 
+        # Scale to 1080p vertical (Shorts: 1080x1920), then burn captions
+        scale_filter = "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2"
+        filter_complex = f"[0:v]{scale_filter}[scaled];[scaled]{subtitle_filter}[v]"
+
         r = subprocess.run(
             ["ffmpeg", "-y",
              "-ss", str(trim_start),
              "-stream_loop", "-1", "-i", str(muted_path),
              "-i", str(mixed_audio),
-             "-filter_complex", f"[0:v]{subtitle_filter}[v]",
+             "-filter_complex", filter_complex,
              "-map", "[v]", "-map", "1:a",
-             "-c:v", "libx264", "-crf", "20", "-preset", "fast",
-             "-c:a", "aac", "-b:a", "128k",
+             "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+             "-c:a", "aac", "-b:a", "192k",
              "-t", str(tts_dur),
              "-shortest", str(final_path)],
             capture_output=True, text=True, timeout=300
         )
         if r.returncode != 0:
-            # fallback without captions
+            # fallback: scale but no captions (log the real error)
+            update_job(job_id, step=f"Captions error, export fara captions...", export_progress=70)
             r2 = subprocess.run(
                 ["ffmpeg", "-y",
                  "-ss", str(trim_start),
                  "-stream_loop", "-1", "-i", str(muted_path),
                  "-i", str(mixed_audio),
-                 "-c:v", "libx264", "-crf", "20", "-preset", "fast",
-                 "-c:a", "aac", "-b:a", "128k",
+                 "-filter_complex", f"[0:v]{scale_filter}[v]",
+                 "-map", "[v]", "-map", "1:a",
+                 "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                 "-c:a", "aac", "-b:a", "192k",
                  "-t", str(tts_dur), "-shortest", str(final_path)],
                 capture_output=True, text=True, timeout=300
             )
