@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shorts Processor</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #11111a;
+      --surface2: #191926;
+      --border: #2a2a40;
+      --accent: #ff4d6d;
+      --accent2: #7c3aed;
+      --accent3: #00d4aa;
+      --text: #e8e8f0;
+      --muted: #7070a0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Syne', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(124, 58, 237, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(124, 58, 237, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 60px 24px 100px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 56px;
+    }
+
+    .logo-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 6px 16px;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+
+    .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent3);
+      box-shadow: 0 0 8px var(--accent3);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    h1 {
+      font-size: clamp(38px, 8vw, 68px);
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, #fff 0%, #c0b0ff 50%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 16px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.6;
+      max-width: 420px;
+      margin: 0 auto;
+    }
+
+    .pipeline {
+      display: flex;
+      justify-content: center;
+      gap: 0;
+      margin-bottom: 48px;
+      position: relative;
+    }
+
+    .pipeline::before {
+      content: '';
+      position: absolute;
+      top: 20px;
+      left: 8%; right: 8%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border), transparent);
+    }
+
+    .step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+    }
+
+    .step-icon {
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .step-label {
+      font-size: 10px;
+      font-family: 'DM Mono', monospace;
+      color: var(--muted);
+      text-align: center;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .input-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 32px;
+      margin-bottom: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .input-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(124,58,237,0.5), transparent);
+    }
+
+    .input-label {
+      display: block;
+      font-size: 11px;
+      font-family: 'DM Mono', monospace;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .url-input {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 18px;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .url-input::placeholder { color: var(--muted); }
+    .url-input:focus {
+      border-color: var(--accent2);
+      box-shadow: 0 0 0 3px rgba(124,58,237,0.1);
+    }
+
+    .process-btn {
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      border: none;
+      border-radius: 12px;
+      padding: 14px 28px;
+      color: white;
+      font-family: 'Syne', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .process-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(255,77,109,0.3); }
+    .process-btn:active { transform: translateY(0); }
+    .process-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .progress-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px 32px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .progress-card.visible { display: block; }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .progress-step-label { font-size: 14px; font-weight: 600; }
+    .progress-pct { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--accent3); }
+
+    .progress-bar-bg {
+      background: var(--surface2);
+      border-radius: 100px;
+      height: 6px;
+      overflow: hidden;
+      margin-bottom: 14px;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 100px;
+      background: linear-gradient(90deg, var(--accent2), var(--accent3));
+      transition: width 0.5s ease;
+      width: 0%;
+      box-shadow: 0 0 12px rgba(0,212,170,0.4);
+    }
+
+    .progress-log {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .spinner {
+      width: 10px; height: 10px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent3);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-card {
+      background: rgba(255,77,109,0.08);
+      border: 1px solid rgba(255,77,109,0.3);
+      border-radius: 16px;
+      padding: 18px 24px;
+      margin-bottom: 20px;
+      display: none;
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      color: #ff8fa3;
+      line-height: 1.7;
+    }
+    .error-card.visible { display: block; }
+
+    .results-card {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 32px;
+      margin-bottom: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .results-card.visible { display: block; animation: fadeUp 0.4s ease; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .results-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent3), transparent);
+    }
+
+    .results-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .checkmark {
+      width: 28px; height: 28px;
+      background: rgba(0,212,170,0.15);
+      border: 1px solid var(--accent3);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    .download-grid {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .download-item {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 20px;
+      transition: border-color 0.2s;
+    }
+    .download-item:hover { border-color: var(--accent2); }
+
+    .dl-icon {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .dl-icon.video { background: rgba(124,58,237,0.15); }
+    .dl-icon.text  { background: rgba(0,212,170,0.1); }
+    .dl-icon.ro    { background: rgba(255,77,109,0.1); }
+
+    .dl-info { flex: 1; min-width: 0; }
+    .dl-name { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+    .dl-desc { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--muted); }
+
+    .dl-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 16px;
+      color: var(--text);
+      font-family: 'Syne', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+    .dl-btn:hover { background: var(--accent2); border-color: var(--accent2); color: white; }
+
+    .transcript-preview { border-top: 1px solid var(--border); padding-top: 24px; }
+
+    .preview-tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+
+    .tab-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 16px;
+      color: var(--muted);
+      font-family: 'Syne', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-btn.active { background: var(--accent2); border-color: var(--accent2); color: white; }
+
+    .transcript-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      line-height: 1.8;
+      color: var(--text);
+      max-height: 200px;
+      overflow-y: auto;
+      display: none;
+    }
+    .transcript-box.active { display: block; }
+    .transcript-box::-webkit-scrollbar { width: 4px; }
+    .transcript-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .reset-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 20px;
+      color: var(--muted);
+      font-family: 'Syne', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: block;
+      margin: 0 auto;
+    }
+    .reset-btn:hover { border-color: var(--text); color: var(--text); }
+
+    @media (max-width: 520px) {
+      .pipeline { display: none; }
+      .input-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="logo-badge">
+      <span class="dot"></span>
+      YouTube Shorts Processor
+    </div>
+    <h1>Shorts<br/>→ Română</h1>
+    <p class="subtitle">
+      Descarcă, elimină vocile, transcrie și traduce în română — automat, fără setări.
+    </p>
+  </header>
+
+  <div class="pipeline">
+    <div class="step">
+      <div class="step-icon">⬇️</div>
+      <div class="step-label">Download</div>
+    </div>
+    <div class="step">
+      <div class="step-icon">🎵</div>
+      <div class="step-label">Vocale</div>
+    </div>
+    <div class="step">
+      <div class="step-icon">🎙️</div>
+      <div class="step-label">Transcriere</div>
+    </div>
+    <div class="step">
+      <div class="step-icon">🇷🇴</div>
+      <div class="step-label">Traducere</div>
+    </div>
+    <div class="step">
+      <div class="step-icon">✅</div>
+      <div class="step-label">Descarcă</div>
+    </div>
+  </div>
+
+  <div class="input-card">
+    <label class="input-label">Link YouTube Shorts</label>
+    <div class="input-row">
+      <input
+        class="url-input"
+        id="urlInput"
+        type="url"
+        placeholder="https://youtube.com/shorts/..."
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button class="process-btn" id="processBtn" onclick="startProcess()">
+        Procesează →
+      </button>
+    </div>
+  </div>
+
+  <div class="progress-card" id="progressCard">
+    <div class="progress-header">
+      <span class="progress-step-label" id="stepLabel">Se procesează...</span>
+      <span class="progress-pct" id="progressPct">0%</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progressBar"></div>
+    </div>
+    <div class="progress-log">
+      <div class="spinner"></div>
+      <span id="progressLog">Inițializare...</span>
+    </div>
+  </div>
+
+  <div class="error-card" id="errorCard"></div>
+
+  <div class="results-card" id="resultsCard">
+    <div class="results-title">
+      <div class="checkmark">✓</div>
+      Gata! Fișierele tale sunt pregătite.
+    </div>
+    <div class="download-grid" id="downloadGrid"></div>
+    <div class="transcript-preview">
+      <div class="preview-tabs">
+        <button class="tab-btn active" onclick="showTab('orig')">Original</button>
+        <button class="tab-btn" onclick="showTab('ro')">Română</button>
+      </div>
+      <div class="transcript-box active" id="origBox"></div>
+      <div class="transcript-box" id="roBox"></div>
+    </div>
+  </div>
+
+  <button class="reset-btn" id="resetBtn" style="display:none" onclick="resetAll()">
+    ↩ Procesează alt video
+  </button>
+
+</div>
+
+<script>
+  let pollInterval = null;
+
+  function showTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach((b, i) => {
+      b.classList.toggle('active', (i === 0 && tab === 'orig') || (i === 1 && tab === 'ro'));
+    });
+    document.getElementById('origBox').classList.toggle('active', tab === 'orig');
+    document.getElementById('roBox').classList.toggle('active', tab === 'ro');
+  }
+
+  async function startProcess() {
+    const url = document.getElementById('urlInput').value.trim();
+    if (!url) { showError('Introdu un link YouTube Shorts valid.'); return; }
+
+    hideError();
+    document.getElementById('resultsCard').classList.remove('visible');
+    document.getElementById('resetBtn').style.display = 'none';
+    document.getElementById('processBtn').disabled = true;
+    document.getElementById('progressCard').classList.add('visible');
+    setProgress(0, 'Se trimite cererea...');
+
+    try {
+      const resp = await fetch('/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await resp.json();
+      if (data.error) { showError(data.error); stopUI(); return; }
+      pollStatus(data.job_id);
+    } catch(e) {
+      showError('Nu s-a putut conecta la server. Asigurați-vă că serverul Flask rulează.');
+      stopUI();
+    }
+  }
+
+  function pollStatus(jobId) {
+    pollInterval = setInterval(async () => {
+      try {
+        const resp = await fetch(`/status/${jobId}`);
+        const data = await resp.json();
+        setProgress(data.progress || 0, data.step || '...');
+        if (data.status === 'done') {
+          clearInterval(pollInterval);
+          showResults(jobId, data);
+        } else if (data.status === 'error') {
+          clearInterval(pollInterval);
+          showError(data.error || 'Eroare necunoscută.');
+          stopUI();
+        }
+      } catch(e) {
+        clearInterval(pollInterval);
+        showError('Conexiunea cu serverul a fost pierdută.');
+        stopUI();
+      }
+    }, 1200);
+  }
+
+  function setProgress(pct, label) {
+    document.getElementById('progressBar').style.width = pct + '%';
+    document.getElementById('progressPct').textContent = pct + '%';
+    document.getElementById('stepLabel').textContent = label;
+    document.getElementById('progressLog').textContent = label;
+  }
+
+  function showResults(jobId, data) {
+    document.getElementById('progressCard').classList.remove('visible');
+    const files = data.files || {};
+    const preview = data.preview || {};
+    const grid = document.getElementById('downloadGrid');
+    grid.innerHTML = '';
+
+    [
+      { key: 'video_no_vocals',    icon: '🎬', cls: 'video', name: 'Video fără vocale',      desc: 'MP4 · Vocale eliminate cu FFmpeg' },
+      { key: 'transcript_original', icon: '📄', cls: 'text',  name: 'Transcriere originală', desc: 'TXT · ElevenLabs Scribe v1' },
+      { key: 'transcript_romanian', icon: '🇷🇴', cls: 'ro',   name: 'Traducere în română',   desc: 'TXT · Google Translate' },
+    ].forEach(item => {
+      if (!files[item.key]) return;
+      grid.innerHTML += `
+        <div class="download-item">
+          <div class="dl-icon ${item.cls}">${item.icon}</div>
+          <div class="dl-info">
+            <div class="dl-name">${item.name}</div>
+            <div class="dl-desc">${item.desc}</div>
+          </div>
+          <a class="dl-btn" href="/download/${jobId}/${files[item.key]}">Descarcă</a>
+        </div>`;
+    });
+
+    if (preview.original) document.getElementById('origBox').textContent = preview.original;
+    if (preview.romanian) document.getElementById('roBox').textContent = preview.romanian;
+
+    document.getElementById('resultsCard').classList.add('visible');
+    document.getElementById('resetBtn').style.display = 'block';
+    document.getElementById('processBtn').disabled = false;
+  }
+
+  function stopUI() {
+    document.getElementById('processBtn').disabled = false;
+    document.getElementById('progressCard').classList.remove('visible');
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('errorCard');
+    el.textContent = '⚠ ' + msg;
+    el.classList.add('visible');
+  }
+
+  function hideError() {
+    document.getElementById('errorCard').classList.remove('visible');
+  }
+
+  function resetAll() {
+    document.getElementById('resultsCard').classList.remove('visible');
+    document.getElementById('resetBtn').style.display = 'none';
+    document.getElementById('urlInput').value = '';
+    hideError();
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('urlInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') startProcess();
+    });
+  });
+</script>
+</body>
+</html>
