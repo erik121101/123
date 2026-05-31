@@ -30,20 +30,19 @@ def update_job(job_id, **kwargs):
 
 
 def find_binary(name):
-    """Find binary in common paths."""
-    import shutil
-    path = shutil.which(name)
-    if path:
-        return path
-    common = [
-        f"/usr/bin/{name}", f"/usr/local/bin/{name}",
-        f"/nix/var/nix/profiles/default/bin/{name}",
-        f"/root/.nix-profile/bin/{name}",
+    """Find binary, prioritizing pip-installed (newer) versions over Nix."""
+    candidates = [
+        f"/usr/local/bin/{name}",
+        f"/root/.local/bin/{name}",
+        f"/home/user/.local/bin/{name}",
+        f"/usr/bin/{name}",
+        f"/bin/{name}",
     ]
-    for p in common:
-        if os.path.isfile(p):
+    for p in candidates:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
-    return name  # fallback, let it fail naturally
+    import shutil
+    return shutil.which(name) or name
 
 
 def translate_to_romanian(text):
@@ -78,45 +77,38 @@ def run_pipeline(job_id, url):
     job_dir.mkdir(exist_ok=True)
 
     try:
-        ytdlp = find_binary("yt-dlp")
+        ytdlp  = find_binary("yt-dlp")
         ffmpeg = find_binary("ffmpeg")
-        node = find_binary("node") or find_binary("nodejs")
+
+        # Log which binaries we're using
+        print(f"[{job_id}] yt-dlp: {ytdlp}")
+        print(f"[{job_id}] ffmpeg: {ffmpeg}")
 
         # ── STEP 1: Download ──────────────────────────────────────────────
         update_job(job_id, step="Se descarcă videoclipul...", progress=10)
         video_path = job_dir / "video.mp4"
 
-        cmd = [ytdlp,
-               "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-               "--merge-output-format", "mp4",
-               "-o", str(video_path)]
-
-        # Add nodejs runtime if available
-        if node:
-            cmd += ["--extractor-args", f"youtube:player_client=web", "--js-interpreter", node]
-
-        cmd.append(url)
-
-        env = os.environ.copy()
-        if node:
-            node_dir = str(Path(node).parent)
-            env["PATH"] = node_dir + ":" + env.get("PATH", "")
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env)
+        # Try best quality first
+        result = subprocess.run(
+            [ytdlp,
+             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+             "--merge-output-format", "mp4",
+             "-o", str(video_path), url],
+            capture_output=True, text=True, timeout=180
+        )
 
         if result.returncode != 0:
-            # Retry without format specification
-            cmd2 = [ytdlp, "-f", "best", "-o", str(video_path), url]
-            if node:
-                cmd2 += ["--js-interpreter", node]
-            result = subprocess.run(cmd2, capture_output=True, text=True, timeout=180, env=env)
+            # Retry with simplest possible format
+            result = subprocess.run(
+                [ytdlp, "-f", "best", "-o", str(video_path), url],
+                capture_output=True, text=True, timeout=180
+            )
             if result.returncode != 0:
-                raise Exception(f"Download eșuat: {result.stderr[:400]}")
+                raise Exception(f"Download eșuat: {result.stderr[:500]}")
 
+        # Find the downloaded file
         if not video_path.exists():
-            mp4s = list(job_dir.glob("*.mp4"))
-            webms = list(job_dir.glob("*.webm"))
-            all_videos = mp4s + webms
+            all_videos = list(job_dir.glob("*.mp4")) + list(job_dir.glob("*.webm")) + list(job_dir.glob("*.mkv"))
             if all_videos:
                 video_path = all_videos[0]
             else:
@@ -154,7 +146,7 @@ def run_pipeline(job_id, url):
         if result.returncode != 0:
             raise Exception(f"Eliminare vocale eșuată: {result.stderr[:300]}")
 
-        # ── STEP 4: Transcribe with ElevenLabs ───────────────────────────
+        # ── STEP 4: Transcribe ────────────────────────────────────────────
         update_job(job_id, step="Se transcrie cu ElevenLabs...", progress=60)
 
         key = ELEVENLABS_API_KEY
