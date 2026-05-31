@@ -110,7 +110,6 @@ def generate_tts_cartesia(text, output_path):
                     "encoding": "mp3",
                     "sample_rate": 44100,
                 },
-                "language": "ro",
             },
             timeout=120
         )
