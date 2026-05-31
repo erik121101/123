@@ -6,7 +6,7 @@ import threading
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from pathlib import Path
 
-# ── Load .env file if present ──────────────────────────────────────────────
+# Load .env if present
 env_path = Path(".env")
 if env_path.exists():
     for line in env_path.read_text().splitlines():
@@ -27,6 +27,23 @@ ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 
 def update_job(job_id, **kwargs):
     jobs[job_id].update(kwargs)
+
+
+def find_binary(name):
+    """Find binary in common paths."""
+    import shutil
+    path = shutil.which(name)
+    if path:
+        return path
+    common = [
+        f"/usr/bin/{name}", f"/usr/local/bin/{name}",
+        f"/nix/var/nix/profiles/default/bin/{name}",
+        f"/root/.nix-profile/bin/{name}",
+    ]
+    for p in common:
+        if os.path.isfile(p):
+            return p
+    return name  # fallback, let it fail naturally
 
 
 def translate_to_romanian(text):
@@ -61,22 +78,47 @@ def run_pipeline(job_id, url):
     job_dir.mkdir(exist_ok=True)
 
     try:
+        ytdlp = find_binary("yt-dlp")
+        ffmpeg = find_binary("ffmpeg")
+        node = find_binary("node") or find_binary("nodejs")
+
         # ── STEP 1: Download ──────────────────────────────────────────────
         update_job(job_id, step="Se descarcă videoclipul...", progress=10)
         video_path = job_dir / "video.mp4"
 
-        result = subprocess.run(
-            ["yt-dlp", "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-             "--merge-output-format", "mp4", "-o", str(video_path), url],
-            capture_output=True, text=True, timeout=120
-        )
+        cmd = [ytdlp,
+               "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+               "--merge-output-format", "mp4",
+               "-o", str(video_path)]
+
+        # Add nodejs runtime if available
+        if node:
+            cmd += ["--extractor-args", f"youtube:player_client=web", "--js-interpreter", node]
+
+        cmd.append(url)
+
+        env = os.environ.copy()
+        if node:
+            node_dir = str(Path(node).parent)
+            env["PATH"] = node_dir + ":" + env.get("PATH", "")
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env)
+
         if result.returncode != 0:
-            raise Exception(f"Download eșuat: {result.stderr[:300]}")
+            # Retry without format specification
+            cmd2 = [ytdlp, "-f", "best", "-o", str(video_path), url]
+            if node:
+                cmd2 += ["--js-interpreter", node]
+            result = subprocess.run(cmd2, capture_output=True, text=True, timeout=180, env=env)
+            if result.returncode != 0:
+                raise Exception(f"Download eșuat: {result.stderr[:400]}")
 
         if not video_path.exists():
             mp4s = list(job_dir.glob("*.mp4"))
-            if mp4s:
-                video_path = mp4s[0]
+            webms = list(job_dir.glob("*.webm"))
+            all_videos = mp4s + webms
+            if all_videos:
+                video_path = all_videos[0]
             else:
                 raise Exception("Niciun fișier video găsit după download.")
 
@@ -85,7 +127,7 @@ def run_pipeline(job_id, url):
         audio_path = job_dir / "audio.mp3"
 
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(video_path),
+            [ffmpeg, "-y", "-i", str(video_path),
              "-vn", "-acodec", "libmp3lame", "-q:a", "2", str(audio_path)],
             capture_output=True, text=True, timeout=60
         )
@@ -97,14 +139,14 @@ def run_pipeline(job_id, url):
         no_vocals_path = job_dir / "no_vocals.mp4"
 
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(video_path),
+            [ffmpeg, "-y", "-i", str(video_path),
              "-af", "pan=stereo|c0=c0-c1|c1=c1-c0",
              "-c:v", "copy", str(no_vocals_path)],
             capture_output=True, text=True, timeout=120
         )
         if result.returncode != 0:
             result = subprocess.run(
-                ["ffmpeg", "-y", "-i", str(video_path),
+                [ffmpeg, "-y", "-i", str(video_path),
                  "-af", "pan=mono|c0=c0-c1",
                  "-c:v", "copy", str(no_vocals_path)],
                 capture_output=True, text=True, timeout=120
@@ -117,7 +159,7 @@ def run_pipeline(job_id, url):
 
         key = ELEVENLABS_API_KEY
         if not key:
-            raise Exception("ELEVENLABS_API_KEY lipsă din fișierul .env")
+            raise Exception("ELEVENLABS_API_KEY lipsă. Adaugă-l în Railway → Variables.")
 
         with open(audio_path, "rb") as f:
             audio_data = f.read()
@@ -140,7 +182,7 @@ def run_pipeline(job_id, url):
         transcript_orig_path = job_dir / "transcript_original.txt"
         transcript_orig_path.write_text(transcript_text, encoding="utf-8")
 
-        # ── STEP 5: Translate to Romanian ─────────────────────────────────
+        # ── STEP 5: Translate ─────────────────────────────────────────────
         update_job(job_id, step="Se traduce în română...", progress=80)
         romanian_text = translate_to_romanian(transcript_text)
 
@@ -208,10 +250,8 @@ def download(job_id, filename):
 if __name__ == "__main__":
     if not ELEVENLABS_API_KEY:
         print("\n⚠️  ELEVENLABS_API_KEY lipsă!")
-        print("   Creează fișierul .env cu conținutul:")
-        print("   ELEVENLABS_API_KEY=cheia_ta_aici\n")
     else:
         print("\n✅  ElevenLabs API Key detectat.")
-    print("🎬  Pornire server la http://localhost:5000\n")
     port = int(os.environ.get("PORT", 5000))
+    print(f"🎬  Pornire server la http://0.0.0.0:{port}\n")
     app.run(debug=False, host="0.0.0.0", port=port)
