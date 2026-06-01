@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Autentificare</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #0f0f1a;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh;
+        }
+        .card {
+            background: #1a1a2e;
+            border: 1px solid #2a2a4a;
+            border-radius: 16px;
+            padding: 48px 40px;
+            width: 100%; max-width: 380px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        h1 { color: #fff; font-size: 1.5rem; margin-bottom: 8px; text-align: center; }
+        p.sub { color: #888; font-size: 0.9rem; text-align: center; margin-bottom: 32px; }
+        label { color: #aaa; font-size: 0.85rem; display: block; margin-bottom: 8px; }
+        input[type=password] {
+            width: 100%; padding: 12px 16px;
+            background: #0f0f1a; border: 1px solid #333;
+            border-radius: 8px; color: #fff;
+            font-size: 1.1rem; letter-spacing: 4px;
+            outline: none; transition: border 0.2s;
+        }
+        input[type=password]:focus { border-color: #6c63ff; }
+        button {
+            width: 100%; margin-top: 20px; padding: 13px;
+            background: #6c63ff; color: #fff; border: none;
+            border-radius: 8px; font-size: 1rem; font-weight: 600;
+            cursor: pointer; transition: background 0.2s;
+        }
+        button:hover { background: #574fd6; }
+        .error { margin-top: 16px; color: #ff6b6b; font-size: 0.9rem; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🔒 Acces restricționat</h1>
+        <p class="sub">Introduceți parola pentru a continua</p>
+        <form method="POST" action="/login">
+            <label>Parolă</label>
+            <input type="password" name="parola" autofocus placeholder="••••">
+            <button type="submit">Intră</button>
+        </form>
+        <div class="error" id="err"></div>
+    </div>
+    <script>
+        const p = new URLSearchParams(window.location.search);
+        if (p.get('error')) document.getElementById('err').textContent = '⚠ Parolă greșită. Încearcă din nou.';
+    </script>
+</body>
+</html>
